@@ -3,6 +3,7 @@ import pandas as pd
 from backend import run_dynamic_forecast 
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
+import json
 
 def inject_mixpanel():
     # This JS reaches into the parent window (the main Streamlit app) and injects Mixpanel
@@ -246,7 +247,7 @@ elif broker_file is None:
 
 st.sidebar.subheader("2. Prediction Parameters")
 lookahead_input = st.sidebar.slider("Forecast Horizon (Days Ahead)", min_value=1, max_value=14, value=3)
-atr_input = st.sidebar.slider("ATR Safety Multiplier (Volatility Buffer)", min_value=0.1, max_value=3.0, value=1.5, step=0.1)
+atr_input = st.sidebar.slider("ATR Safety Multiplier (Volatility Buffer)", min_value=0.1, max_value=3.0, value=1.0, step=0.1)
 
 if target_file and broker_file:
     st.info(f"Price and Broker data loaded successfully. Ready to generate a {lookahead_input}-day forecast.")
