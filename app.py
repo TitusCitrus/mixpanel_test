@@ -29,6 +29,21 @@ def inject_mixpanel():
     # Render an invisible 0x0 component to execute the script
     components.html(mixpanel_js, width=0, height=0)
 
+def track_mixpanel_event(event_name, properties=None):
+    """Injects a JS script to fire a Mixpanel event from Streamlit."""
+    if properties is None:
+        properties = {}
+    
+    props_json = json.dumps(properties)
+    tracking_js = f"""
+    <script type="text/javascript">
+        if (window.parent !== window && window.parent.mixpanel) {{
+            window.parent.mixpanel.track('{event_name}', {props_json});
+        }}
+    </script>
+    """
+    components.html(tracking_js, width=0, height=0)
+
 # ==========================================
 # 1. GAUGE CHART FUNCTION 
 # ==========================================
@@ -185,15 +200,49 @@ def draw_broker_inventory_chart(broker_file):
 # 4. STREAMLIT UI
 # ==========================================
 st.set_page_config(page_title="AI Trading Forecast", page_icon="📈", layout="wide")
-inject_mixpanel()
 
+inject_mixpanel()
+if 'tracked_intent' not in st.session_state:
+    st.session_state.tracked_intent = False
+if 'tracked_target_upload' not in st.session_state:
+    st.session_state.tracked_target_upload = False
+if 'tracked_broker_upload' not in st.session_state:
+    st.session_state.tracked_broker_upload = False
+    
 st.title("Dynamic Algorithmic Price Prediction Model")
 
 st.sidebar.header("Configuration")
 
 st.sidebar.subheader("1. Upload Data")
+
+# --- TRIGGER 1: Intent (App Opened & Ready) ---
+if not st.session_state.tracked_intent:
+    track_mixpanel_event("Upload Feature Interaction", {"Status": "Opened"})
+    st.session_state.tracked_intent = True
+
 target_file = st.sidebar.file_uploader("Upload Target Asset", type=['csv'])
 broker_file = st.sidebar.file_uploader("Upload Broker Summary", type=['csv']) 
+
+# --- TRIGGER 2: Target File Uploaded ---
+if target_file is not None and not st.session_state.tracked_target_upload:
+    track_mixpanel_event("Upload Feature Interaction", {
+        "Status": "File Uploaded",
+        "File Type": "Target Asset CSV"
+    })
+    st.session_state.tracked_target_upload = True
+elif target_file is None:
+    # Reset if they click the 'X' to remove the file
+    st.session_state.tracked_target_upload = False
+
+# --- TRIGGER 3: Broker File Uploaded ---
+if broker_file is not None and not st.session_state.tracked_broker_upload:
+    track_mixpanel_event("Upload Feature Interaction", {
+        "Status": "File Uploaded",
+        "File Type": "Broker Summary CSV"
+    })
+    st.session_state.tracked_broker_upload = True
+elif broker_file is None:
+    st.session_state.tracked_broker_upload = False
 
 st.sidebar.subheader("2. Prediction Parameters")
 lookahead_input = st.sidebar.slider("Forecast Horizon (Days Ahead)", min_value=1, max_value=14, value=3)
@@ -222,8 +271,14 @@ if target_file and broker_file:
 
     target_file.seek(0) 
     broker_file.seek(0)
-    
+
     if st.button("🚀 Run Forecast"):
+        # --- TRIGGER 4: Forecast Executed ---
+        track_mixpanel_event("Forecast Executed", {
+            "Lookahead Days": lookahead_input,
+            "ATR Multiplier": atr_input
+        })
+        
         with st.spinner(f"Fusing order flow data, training models, and predicting {lookahead_input} days ahead..."):
             try:
                 results_df, latest_score = run_dynamic_forecast(
