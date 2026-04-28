@@ -51,27 +51,28 @@ def track_mixpanel_event(event_name, properties=None):
 
 # --- GOOGLE ANALYTICS FUNCTIONS (Globally Scoped) ---
 def inject_ga():
+    """Injects GA4 via direct object manipulation to bypass CSP unsafe-inline blocks."""
     ga_js = """
     <script type="text/javascript">
         if (window.parent !== window) {
-            var parentDocument = window.parent.document;
-            if (!parentDocument.getElementById('google-analytics')) {
-                // Add the external GA4 script
-                var script1 = parentDocument.createElement('script');
-                script1.id = 'google-analytics';
-                script1.async = true;
-                script1.src = 'https://www.googletagmanager.com/gtag/js?id=G-XJZX8QCNPJ';
-                parentDocument.head.appendChild(script1);
-
-                // Add the inline config and EXPLICITLY attach to the window
-                var script2 = parentDocument.createElement('script');
-                script2.innerHTML = `
-                  window.dataLayer = window.dataLayer || [];
-                  window.gtag = function(){ window.dataLayer.push(arguments); };
-                  window.gtag('js', new Date());
-                  window.gtag('config', 'G-XJZX8QCNPJ');
-                `;
-                parentDocument.head.appendChild(script2);
+            // 1. Explicitly build the dataLayer in the parent memory
+            window.parent.dataLayer = window.parent.dataLayer || [];
+            
+            // 2. Define gtag directly on the parent window object
+            if (!window.parent.gtag) {
+                window.parent.gtag = function() {
+                    window.parent.dataLayer.push(arguments);
+                };
+                
+                // 3. Initialize config
+                window.parent.gtag('js', new Date());
+                window.parent.gtag('config', 'G-XJZX8QCNPJ');
+                
+                // 4. Inject ONLY the external script (which passes CSP rules)
+                var script = window.parent.document.createElement('script');
+                script.async = true;
+                script.src = 'https://www.googletagmanager.com/gtag/js?id=G-XJZX8QCNPJ';
+                window.parent.document.head.appendChild(script);
             }
         }
     </script>
@@ -79,6 +80,7 @@ def inject_ga():
     components.html(ga_js, width=0, height=0)
 
 def track_ga_event(event_name, properties=None):
+    """Fires a custom event to GA4."""
     if properties is None: properties = {}
     props_json = json.dumps(properties)
     tracking_js = f"""
