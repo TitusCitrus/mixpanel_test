@@ -4,69 +4,44 @@ from backend import run_dynamic_forecast
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 import json
+import uuid
+from mixpanel import Mixpanel
 
 # ==========================================
-# TRACKING & ANALYTICS FUNCTIONS
+# 1. TRACKING & ANALYTICS SETUP
 # ==========================================
-def inject_mixpanel():
-    mixpanel_js = """
-    <script type="text/javascript">
-        if (window.parent !== window) {
-            var parentDocument = window.parent.document;
-            if (!parentDocument.getElementById('mixpanel-script')) {
-                var script = parentDocument.createElement('script');
-                script.id = 'mixpanel-script';
-                script.type = 'text/javascript';
-                script.innerHTML = `
-                    (function(e,c){if(!c.__SV){var l,h;window.mixpanel=c;c._i=[];c.init=function(q,r,f){function t(d,a){var g=a.split(".");2==g.length&&(d=d[g[0]],a=g[1]);d[a]=function(){d.push([a].concat(Array.prototype.slice.call(arguments,0)))}}var b=c;"undefined"!==typeof f?b=c[f]=[]:f="mixpanel";b.people=b.people||[];b.toString=function(d){var a="mixpanel";"mixpanel"!==f&&(a+="."+f);d||(a+=" (stub)");return a};b.people.toString=function(){return b.toString(1)+".people (stub)"};l="disable time_event track track_pageview track_links track_forms track_with_groups add_group set_group remove_group register register_once alias unregister identify name_tag set_config reset opt_in_tracking opt_out_tracking has_opted_in_tracking has_opted_out_tracking clear_opt_in_out_tracking start_batch_senders start_session_recording stop_session_recording people.set people.set_once people.unset people.increment people.append people.union people.track_charge people.clear_charges people.delete_user people.remove".split(" ");
-                    for(h=0;h<l.length;h++)t(b,l[h]);var n="set set_once union unset remove delete".split(" ");b.get_group=function(){function d(p){a[p]=function(){b.push([g,[p].concat(Array.prototype.slice.call(arguments,0))])}}for(var a={},g=["get_group"].concat(Array.prototype.slice.call(arguments,0)),m=0;m<n.length;m++)d(n[m]);return a};c._i.push([q,r,f])};c.__SV=1.2;var k=e.createElement("script");k.type="text/javascript";k.async=!0;k.src="undefined"!==typeof MIXPANEL_CUSTOM_LIB_URL?MIXPANEL_CUSTOM_LIB_URL:"https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js";e=e.getElementsByTagName("script")[0];e.parentNode.insertBefore(k,e)}})(document,window.mixpanel||[]);
-                    
-                    mixpanel.init('63a4f4f8d971e9838dc46e709a68bfb4', {
-                        autocapture: true,
-                        record_sessions_percent: 100,
-                        api_host: 'https://api-eu.mixpanel.com',
-                    });
-                `;
-                parentDocument.head.appendChild(script);
-            }
-        }
-    </script>
-    """
-    components.html(mixpanel_js, width=0, height=0)
+# Initialize Mixpanel server-side (Bulletproof)
+mp = Mixpanel("63a4f4f8d971e9838dc46e709a68bfb4", host="api-eu.mixpanel.com")
 
-def track_mixpanel_event(event_name, properties=None):
+def track_mp_event(event_name, properties=None):
+    """Tracks events via Python backend to guarantee delivery."""
     if properties is None: properties = {}
-    props_json = json.dumps(properties)
-    tracking_js = f"""
-    <script type="text/javascript">
-        if (window.parent !== window && window.parent.mixpanel) {{
-            window.parent.mixpanel.track('{event_name}', {props_json});
-        }}
-    </script>
-    """
-    components.html(tracking_js, width=0, height=0)
+    try:
+        mp.track(st.session_state.session_id, event_name, properties)
+    except Exception:
+        pass # Fail silently so tracking never breaks the app
 
 def inject_ga():
-    """Injects Google Analytics into the parent Streamlit window."""
+    """Injects Google Analytics into the parent window (Globally Scoped)."""
     ga_js = """
     <script type="text/javascript">
         if (window.parent !== window) {
             var parentDocument = window.parent.document;
             if (!parentDocument.getElementById('google-analytics')) {
-                // Add the external script
+                // Add the external GA4 script
                 var script1 = parentDocument.createElement('script');
                 script1.id = 'google-analytics';
                 script1.async = true;
                 script1.src = 'https://www.googletagmanager.com/gtag/js?id=G-XJZX8QCNPJ';
                 parentDocument.head.appendChild(script1);
 
-                // Add the inline configuration script
+                // Add the inline config and EXPLICITLY attach to the window
                 var script2 = parentDocument.createElement('script');
                 script2.innerHTML = `
                   window.dataLayer = window.dataLayer || [];
-                  function gtag(){dataLayer.push(arguments);}
-                  gtag('js', new Date());
-                  gtag('config', 'G-XJZX8QCNPJ');
+                  window.gtag = function(){ window.dataLayer.push(arguments); };
+                  window.gtag('js', new Date());
+                  window.gtag('config', 'G-XJZX8QCNPJ');
                 `;
                 parentDocument.head.appendChild(script2);
             }
@@ -76,7 +51,7 @@ def inject_ga():
     components.html(ga_js, width=0, height=0)
 
 def track_ga_event(event_name, properties=None):
-    """Fires a custom event to Google Analytics."""
+    """Fires a custom event to the globally scoped GA4 function."""
     if properties is None: properties = {}
     props_json = json.dumps(properties)
     tracking_js = f"""
@@ -88,8 +63,9 @@ def track_ga_event(event_name, properties=None):
     """
     components.html(tracking_js, width=0, height=0)
 
+
 # ==========================================
-# 1. GAUGE CHART FUNCTION 
+# 2. CHART FUNCTIONS 
 # ==========================================
 def draw_gauge(score):
     fig = go.Figure(go.Indicator(
@@ -144,15 +120,10 @@ def draw_gauge(score):
             x=0.5
         )
     )
-    
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False)
-    
     return fig
 
-# ==========================================
-# 2. INTERACTIVE PRICE CHART FUNCTION
-# ==========================================
 def draw_price_chart(df):
     df_recent = df.tail(90) 
     
@@ -177,14 +148,10 @@ def draw_price_chart(df):
         plot_bgcolor='rgba(0,0,0,0)', 
         font=dict(color='white')
     )
-    
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(211, 211, 211, 0.2)')
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(211, 211, 211, 0.2)')
     return fig
 
-# ==========================================
-# 3. BROKER INVENTORY CHART FUNCTION 
-# ==========================================
 def draw_broker_inventory_chart(broker_file):
     df = pd.read_csv(broker_file)
     
@@ -213,7 +180,6 @@ def draw_broker_inventory_chart(broker_file):
     unified['Net_Vol'] = unified['Buy'] - unified['Sell']
     
     top_10 = unified.nlargest(10, 'Total_Vol').sort_values('Net_Vol')
-    
     colors = ['#ff4d4d' if val < 0 else '#33cc33' for val in top_10['Net_Vol']]
     
     fig = go.Figure(go.Bar(
@@ -236,35 +202,35 @@ def draw_broker_inventory_chart(broker_file):
         plot_bgcolor='rgba(0,0,0,0)', 
         font=dict(color='white')
     )
-    
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(211, 211, 211, 0.2)')
     return fig
 
+
 # ==========================================
-# 4. STREAMLIT UI
+# 3. STREAMLIT UI & INTERACTION
 # ==========================================
 st.set_page_config(page_title="AI Trading Forecast", page_icon="📈", layout="wide")
 
-# Initialize Tracking
-inject_mixpanel()
-inject_ga()
-
+# Session Management for Tracking
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 if 'tracked_intent' not in st.session_state:
     st.session_state.tracked_intent = False
 if 'tracked_target_upload' not in st.session_state:
     st.session_state.tracked_target_upload = False
 if 'tracked_broker_upload' not in st.session_state:
     st.session_state.tracked_broker_upload = False
-    
+
+# Inject Google Analytics
+inject_ga()
+
 st.title("Dynamic Algorithmic Price Prediction Model")
-
 st.sidebar.header("Configuration")
-
 st.sidebar.subheader("1. Upload Data")
 
-# --- TRIGGER 1: Intent (App Opened & Ready) ---
+# --- TRIGGER 1: Intent (App Opened) ---
 if not st.session_state.tracked_intent:
-    track_mixpanel_event("Upload Feature Interaction", {"Status": "Opened"})
+    track_mp_event("App Opened", {"Status": "Ready"})
     track_ga_event("app_opened", {"status": "ready"})
     st.session_state.tracked_intent = True
 
@@ -274,17 +240,16 @@ broker_file = st.sidebar.file_uploader("Upload Broker Summary", type=['csv'])
 # --- TRIGGER 2: Target File Uploaded ---
 if target_file is not None and not st.session_state.tracked_target_upload:
     event_props = {"Status": "File Uploaded", "File Type": "Target Asset CSV"}
-    track_mixpanel_event("Upload Feature Interaction", event_props)
+    track_mp_event("Upload Feature Interaction", event_props)
     track_ga_event("file_uploaded", event_props)
     st.session_state.tracked_target_upload = True
 elif target_file is None:
-    # Reset if they click the 'X' to remove the file
     st.session_state.tracked_target_upload = False
 
 # --- TRIGGER 3: Broker File Uploaded ---
 if broker_file is not None and not st.session_state.tracked_broker_upload:
     event_props = {"Status": "File Uploaded", "File Type": "Broker Summary CSV"}
-    track_mixpanel_event("Upload Feature Interaction", event_props)
+    track_mp_event("Upload Feature Interaction", event_props)
     track_ga_event("file_uploaded", event_props)
     st.session_state.tracked_broker_upload = True
 elif broker_file is None:
@@ -324,7 +289,7 @@ if target_file and broker_file:
             "Lookahead Days": lookahead_input,
             "ATR Multiplier": atr_input
         }
-        track_mixpanel_event("Forecast Executed", event_props)
+        track_mp_event("Forecast Executed", event_props)
         track_ga_event("forecast_executed", event_props)
         
         with st.spinner(f"Fusing order flow data, training models, and predicting {lookahead_input} days ahead..."):
@@ -340,7 +305,6 @@ if target_file and broker_file:
                 st.divider() 
                 
                 latest_pred = results_df.iloc[-1]
-                
                 col1, col2 = st.columns([1, 1.5])
                 
                 with col1:
